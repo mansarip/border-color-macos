@@ -38,6 +38,8 @@ enum {
 #define DOCK_PATH "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"
 #define EXPOSE_BACKDROP_LEVEL 18  // the Dock's full-screen window behind Mission Control (macOS 26)
 #define EXPOSE_FPS 120
+#define EXPOSE_SETTLE_TICKS 5  // ~40 ms without movement: the zoom animation has finished
+#define EXPOSE_WIDTH 4.0f      // thumbnails are small; the user's width doesn't carry over
 #define EXPOSE_TIMEOUT 1.0  // seconds for a candidate backdrop to come up
 #define MAX_BACKDROPS 8
 
@@ -58,6 +60,8 @@ typedef struct {
   be_color color;
   overlay overlay;
   overlay thumbnail;  // follows the window's Mission Control / App Exposé thumbnail
+  CGRect thumb_frame;  // thumbnail's last on-screen rect
+  int thumb_still;     // ticks the thumbnail has kept that rect
 } tracked_window;
 
 typedef struct {
@@ -411,7 +415,14 @@ static void end_expose(void) {
   E.expose_timer = NULL;
   E.backdrop_count = 0;
   E.expose_up = false;
-  for (int i = 0; i < E.count; i++) overlay_destroy(&E.windows[i].thumbnail, E.border_cid);
+  // Keep the strips for next time: creating them takes ~5 ms per window, which would
+  // delay the borders after the zoom animation; reusing them takes ~0.1-4 ms.
+  for (int i = 0; i < E.count; i++) {
+    tracked_window *w = &E.windows[i];
+    overlay_hide(&w->thumbnail, E.border_cid);
+    w->thumb_frame = CGRectZero;
+    w->thumb_still = 0;
+  }
 }
 
 // True while one of the candidates is ordered in at the backdrop level. Forgets the
@@ -463,10 +474,22 @@ static void follow_thumbnails(void) {
                    thumb.size.width >= MIN_WINDOW_SIZE && thumb.size.height >= MIN_WINDOW_SIZE;
     if (!visible) {
       overlay_hide(&w->thumbnail, E.border_cid);
+      w->thumb_still = 0;
       continue;
     }
+    // Following the zoom animation frame by frame lags and looks jittery, so the border
+    // only appears once the thumbnail has stopped moving. A thumbnail still on the
+    // window's own frame hasn't started zooming in (or has finished zooming out).
+    if (!CGRectEqualToRect(thumb, w->thumb_frame) || CGRectEqualToRect(thumb, w->overlay.frame)) {
+      w->thumb_frame = thumb;
+      w->thumb_still = 0;
+      overlay_hide(&w->thumbnail, E.border_cid);
+      continue;
+    }
+    if (w->thumb_still >= EXPOSE_SETTLE_TICKS) continue;  // already shown
+    if (++w->thumb_still < EXPOSE_SETTLE_TICKS) continue;
     overlay_style style = {
-        .width = E.width,
+        .width = EXPOSE_WIDTH,
         .radius = w->overlay.style.radius * thumb.size.width / w->overlay.frame.size.width,
         .color = w->color,
         .alpha = 1.0f,  // nothing is focused in Exposé: every thumbnail is a candidate

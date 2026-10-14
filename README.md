@@ -30,7 +30,7 @@ Settings live in `~/Library/Application Support/BorderColor/config.json` (width,
 - Each border is four thin click-through windows around the target window, stacked directly below it and kept on its Space. Strips instead of one big transparent window keep memory small (~3 MB vs ~38 MB for a large Retina window).
 - WindowServer notifications drive the borders: move, resize, hide/minimize, restore, close, Space changes and focus changes.
 - While the Dock animates a window (genie minimize or restore), its border is hidden. The animation's start event doesn't name the window, but the animating window carries a tag bit until the matching end event.
-- Mission Control and App Exposé shrink windows into thumbnails without any event, and fade the normal borders out. When they open, the Dock creates a full-screen backdrop window; while it is up, the engine polls the window list (which reports each thumbnail's on-screen rect) at 120 Hz and draws a second, full-opacity border above each thumbnail. Polling stops when the backdrop goes away.
+- Mission Control and App Exposé shrink windows into thumbnails without any event, and fade the normal borders out. When they open, the Dock creates a full-screen backdrop window; while it is up, the engine polls the window list (which reports each thumbnail's on-screen rect) at 120 Hz. Once a thumbnail stops moving, it gets a second border on top: 4 px, full opacity. Borders stay hidden during the zoom animations. Polling stops when the backdrop goes away.
 - `Sources/BorderColor` (Swift, AppKit) contains the menu, the colour panel and the JSON settings.
 
 ## Known limitations
