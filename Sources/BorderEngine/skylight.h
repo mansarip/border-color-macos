@@ -71,7 +71,8 @@ typedef void (*sl_notify_fn)(uint32_t event, void *data, size_t length, void *co
   X(CFArrayRef, WindowIteratorGetCornerRadii, "SLSWindowIteratorGetCornerRadii",                \
     (CFTypeRef iterator))                                                                       \
   X(CGError, WindowSetShadowProperties, "SLSWindowSetShadowProperties",                         \
-    (uint32_t wid, CFDictionaryRef properties))
+    (uint32_t wid, CFDictionaryRef properties))                                                 \
+  X(CGError, GetWindowAlpha, "SLSGetWindowAlpha", (int cid, uint32_t wid, float *alpha))
 
 #define SL_FIELD(ret, field, symbol, params) ret(*field) params;
 extern struct skylight {

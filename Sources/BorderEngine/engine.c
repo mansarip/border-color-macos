@@ -38,6 +38,8 @@ enum {
 #define DOCK_PATH "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"
 #define EXPOSE_BACKDROP_LEVEL 18  // the Dock's full-screen window behind Mission Control (macOS 26)
 #define EXPOSE_FPS 120
+#define FADE_POLL_HZ 30
+#define FADE_EPSILON 0.01f
 #define EXPOSE_SETTLE_TICKS 5  // ~40 ms without movement: the zoom animation has finished
 #define EXPOSE_WIDTH 4.0f      // thumbnails are small; the user's width doesn't carry over
 #define EXPOSE_TIMEOUT 1.0  // seconds for a candidate backdrop to come up
@@ -57,6 +59,8 @@ typedef struct {
   bool styled;     // color_fn wants a border for this app
   bool dirty;      // refresh on the next flush
   bool animating;  // hidden while the Dock animates it; refreshed when the animation ends
+  bool fading;     // hidden while the window fades out (closing or hiding)
+  float window_alpha;  // the window's usual opacity, to tell a fade from a translucent window
   be_color color;
   overlay overlay;
   overlay thumbnail;  // follows the window's Mission Control / App Exposé thumbnail
@@ -92,6 +96,7 @@ static struct {
   CFAbsoluteTime expose_start;
   bool expose_up;
   bool flush_pending, focus_pending, reconcile_pending, watch_list_dirty;
+  dispatch_source_t fade_timer;
 } E;
 
 // MARK: - Window queries
@@ -195,7 +200,7 @@ static void refresh(tracked_window *w) {
   bool ordered_in = false;
   sl.WindowIsOrderedIn(E.cid, w->wid, &ordered_in);
   w->animating = (info.tags & TAG_DOCK_ANIMATING) != 0;
-  if (!E.enabled || !w->styled || !ordered_in || w->animating) {
+  if (!E.enabled || !w->styled || !ordered_in || w->animating || w->fading) {
     overlay_hide(&w->overlay, E.border_cid);
     return;
   }
@@ -291,7 +296,10 @@ static void update_focus(void) {
   E.focused = focused;
   if (previous) overlay_set_alpha(&previous->overlay, E.border_cid, inactive_alpha());
   tracked_window *current = find(focused);
-  if (current) overlay_set_alpha(&current->overlay, E.border_cid, 1.0f);
+  if (current) {
+    overlay_set_alpha(&current->overlay, E.border_cid, 1.0f);
+    current->window_alpha = 0;  // watch_fade learns its usual opacity afresh
+  }
 }
 
 // MARK: - Scheduling (coalesces bursts of events into one pass)
@@ -373,6 +381,28 @@ static void hide_animating_windows(void) {
 static void finish_animations(void) {
   for (int i = 0; i < E.count; i++)
     if (E.windows[i].animating) mark_dirty(&E.windows[i]);
+}
+
+// Closing or hiding a window fades it out over ~0.2 s, but nothing marks the start: the
+// hide event only arrives once the fade is over (~0.3 s). Cmd+W closes the focused
+// window, so poll its opacity and hide the border as soon as it starts fading.
+static void watch_fade(void) {
+  tracked_window *w = find(E.focused);
+  float alpha = 1;
+  if (!E.enabled || !w || !(w->overlay.shown || w->fading) ||
+      sl.GetWindowAlpha(E.cid, w->wid, &alpha) != kCGErrorSuccess)
+    return;
+  if (alpha < w->window_alpha - FADE_EPSILON) {
+    if (w->fading) return;
+    LOG("fading %u: hide border", w->wid);
+    w->fading = true;
+    overlay_hide(&w->overlay, E.border_cid);
+  } else if (w->fading) {
+    w->fading = false;  // the fade was reversed
+    mark_dirty(w);
+  } else {
+    w->window_alpha = alpha;
+  }
 }
 
 // A window that just joined a Space may not be fully set up yet; look again shortly.
@@ -560,8 +590,13 @@ static void handle_event(uint32_t event, void *data, size_t length, void *contex
     }
     break;
   case EVENT_WINDOW_RESIZE:
-  case EVENT_WINDOW_UNHIDE:
     if (w) mark_dirty(w);
+    break;
+  case EVENT_WINDOW_UNHIDE:
+    if (w) {
+      w->fading = false;
+      mark_dirty(w);
+    }
     break;
   case EVENT_WINDOW_LEVEL:
     if (w) mark_dirty(w);
@@ -569,6 +604,7 @@ static void handle_event(uint32_t event, void *data, size_t length, void *contex
     break;
   case EVENT_WINDOW_HIDE:
     if (w) {
+      w->fading = false;  // the fade (if any) is over
       overlay_hide(&w->overlay, E.border_cid);
       mark_dirty(w);
     }
@@ -628,6 +664,16 @@ bool be_start(be_color_fn color_fn, void *context) {
   discover(kCGWindowListOptionAll);  // includes windows on other Spaces and minimized ones
   update_watch_list();
   update_focus();
+
+  if (sl.GetWindowAlpha) {
+    E.fade_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(E.fade_timer, DISPATCH_TIME_NOW, NSEC_PER_SEC / FADE_POLL_HZ,
+                              5 * NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(E.fade_timer, ^{
+      watch_fade();
+    });
+    dispatch_resume(E.fade_timer);
+  }
   E.started = true;
   LOG("started: tracking %d windows", E.count);
   return true;
