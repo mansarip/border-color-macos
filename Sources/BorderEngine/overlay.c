@@ -10,7 +10,7 @@
 #define TAG_EXPOSE_FADE (1ULL << 1)    // fade out when Mission Control activates
 #define TAG_IGNORES_MOUSE (1ULL << 9)  // clicks fall through to the window underneath
 
-enum { ORDER_OUT = 0, ORDER_BELOW = -1 };
+enum { ORDER_OUT = 0, ORDER_BELOW = -1, ORDER_ABOVE = 1 };
 
 static void add_rounded_rect(CGMutablePathRef path, CGRect rect, CGFloat radius) {
   radius = fmin(radius, fmin(rect.size.width, rect.size.height) / 2);
@@ -53,7 +53,7 @@ static CFDictionaryRef no_shadow(void) {
   return properties;
 }
 
-static uint32_t create_window(int cid, CGRect rect, int level) {
+static uint32_t create_window(int cid, CGRect rect, int level, bool expose) {
   CGRect local = {CGPointZero, rect.size};
   CFTypeRef region = NULL;
   if (sl.NewRegionWithRect(&local, &region) != kCGErrorSuccess || !region) return 0;
@@ -62,7 +62,8 @@ static uint32_t create_window(int cid, CGRect rect, int level) {
   CFRelease(region);
   if (!wid) return 0;
 
-  uint64_t tags = TAG_EXPOSE_FADE | TAG_IGNORES_MOUSE;
+  // Ordinary borders fade out in Mission Control; their Exposé stand-ins must not.
+  uint64_t tags = expose ? TAG_IGNORES_MOUSE : TAG_EXPOSE_FADE | TAG_IGNORES_MOUSE;
   sl.SetWindowTags(cid, wid, &tags, 64);
   sl.SetWindowResolution(cid, wid, BACKING_SCALE);
   sl.SetWindowOpacity(cid, wid, false);
@@ -79,16 +80,18 @@ static void destroy_strips(overlay *o, int cid) {
   memset(o, 0, sizeof *o);
 }
 
-static bool create_strips(overlay *o, int cid, const CGRect *strips, int count, int level) {
+static bool create_strips(overlay *o, int cid, const CGRect *strips, int count, int level,
+                          bool expose) {
   for (int i = 0; i < count; i++) {
     o->count = i + 1;
     o->rect[i] = strips[i];
-    o->wid[i] = create_window(cid, strips[i], level);
+    o->wid[i] = create_window(cid, strips[i], level, expose);
     if (!o->wid[i]) return false;
     o->context[i] = sl.WindowContextCreate(cid, o->wid[i], NULL);
     if (!o->context[i]) return false;
   }
   o->style.level = level;
+  o->style.expose = expose;
   return true;
 }
 
@@ -141,7 +144,7 @@ static void update(overlay *o, int cid, uint32_t target, CGRect frame, overlay_s
   bool created = false;
   if (count != o->count) {
     destroy_strips(o, cid);
-    if (!create_strips(o, cid, strips, count, style.level)) {
+    if (!create_strips(o, cid, strips, count, style.level, style.expose)) {
       destroy_strips(o, cid);
       return;
     }
@@ -193,7 +196,11 @@ static void update(overlay *o, int cid, uint32_t target, CGRect frame, overlay_s
   if (transaction) {
     for (int i = 0; i < count; i++) {
       sl.TransactionMoveWindowWithGroup(transaction, o->wid[i], strips[i].origin);
-      if (restack || !o->shown) sl.TransactionOrderWindow(transaction, o->wid[i], ORDER_BELOW, target);
+      if (o->style.expose) {
+        if (!o->shown) sl.TransactionOrderWindow(transaction, o->wid[i], ORDER_ABOVE, 0);
+      } else if (restack || !o->shown) {
+        sl.TransactionOrderWindow(transaction, o->wid[i], ORDER_BELOW, target);
+      }
       if (!o->shown || style.alpha != o->style.alpha)
         sl.TransactionSetWindowAlpha(transaction, o->wid[i], style.alpha);
     }

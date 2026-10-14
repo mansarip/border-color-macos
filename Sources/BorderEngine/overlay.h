@@ -15,6 +15,7 @@ typedef struct {
   float alpha;     // whole-border opacity (focus state)
   uint64_t space;  // Space the target lives on
   int level;       // target window level
+  bool expose;     // drawn over a Mission Control thumbnail: no target, no Space, not faded
 } overlay_style;
 
 typedef struct {
@@ -28,6 +29,7 @@ typedef struct {
 } overlay;
 
 // Shows or updates the border around `target`, whose frame is `frame` (global coordinates).
+// With style->expose, `target` is ignored and the border sits on top of its level.
 void overlay_show(overlay *o, int cid, uint32_t target, CGRect frame, const overlay_style *style);
 
 // Follows a target that moved; only repositions the strips when its size is unchanged.

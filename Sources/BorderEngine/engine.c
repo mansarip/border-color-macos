@@ -2,6 +2,7 @@
 #include "overlay.h"
 #include "skylight.h"
 #include <dispatch/dispatch.h>
+#include <libproc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,7 @@ enum {
   EVENT_WINDOW_MOVE = 806,
   EVENT_WINDOW_RESIZE = 807,
   EVENT_WINDOW_REORDER = 808,
-  EVENT_WINDOW_LEVEL = 811,
+  EVENT_WINDOW_LEVEL = 811,   // also arrives for other apps' new windows, e.g. the Dock's
   EVENT_WINDOW_UNHIDE = 815,  // also: restored from the Dock
   EVENT_WINDOW_HIDE = 816,    // also: minimized (sent when the animation ends)
   EVENT_SPACE_ADD = 1325,     // window joined a Space (first shown); payload: u64 sid, u32 wid
@@ -34,6 +35,11 @@ enum {
 #define MIN_WIDTH 1.0f
 #define MAX_WIDTH 40.0f
 #define ALL_SPACES_MASK 0x7
+#define DOCK_PATH "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"
+#define EXPOSE_BACKDROP_LEVEL 18  // the Dock's full-screen window behind Mission Control (macOS 26)
+#define EXPOSE_FPS 120
+#define EXPOSE_TIMEOUT 1.0  // seconds for a candidate backdrop to come up
+#define MAX_BACKDROPS 8
 
 #define LOG(...)                                       \
   do {                                                 \
@@ -51,6 +57,7 @@ typedef struct {
   bool animating;  // hidden while the Dock animates it; refreshed when the animation ends
   be_color color;
   overlay overlay;
+  overlay thumbnail;  // follows the window's Mission Control / App Exposé thumbnail
 } tracked_window;
 
 typedef struct {
@@ -74,6 +81,12 @@ static struct {
   tracked_window *windows;
   int count, capacity;
   uint32_t focused;
+  pid_t dock_pid;
+  uint32_t backdrops[MAX_BACKDROPS];  // new full-screen Dock windows: possible Exposé backdrops
+  int backdrop_count;
+  dispatch_source_t expose_timer;  // runs while Mission Control or App Exposé may be open
+  CFAbsoluteTime expose_start;
+  bool expose_up;
   bool flush_pending, focus_pending, reconcile_pending, watch_list_dirty;
 } E;
 
@@ -162,6 +175,7 @@ static float alpha_for(const tracked_window *w) {
 static void untrack(tracked_window *w) {
   LOG("untrack %u", w->wid);
   overlay_destroy(&w->overlay, E.border_cid);
+  overlay_destroy(&w->thumbnail, E.border_cid);
   if (E.focused == w->wid) E.focused = 0;
   *w = E.windows[--E.count];
   E.watch_list_dirty = true;
@@ -367,6 +381,124 @@ static void retrack_later(uint32_t wid) {
   });
 }
 
+// MARK: - Exposé
+
+// Mission Control and App Exposé shrink windows into thumbnails without sending any
+// event, and fade the ordinary borders out (TAG_EXPOSE_FADE). While the Dock's backdrop
+// window is up, a second border per window follows its thumbnail. The window list
+// reports the on-screen (transformed) rect; SLSGetWindowBounds keeps the real frame.
+
+static bool is_dock(pid_t pid) {
+  if (pid <= 0) return false;
+  if (pid == E.dock_pid) return true;
+  char path[PROC_PIDPATHINFO_MAXSIZE];
+  if (proc_pidpath(pid, path, sizeof path) <= 0 || strcmp(path, DOCK_PATH) != 0) return false;
+  E.dock_pid = pid;  // changes when the Dock restarts
+  return true;
+}
+
+static bool covers_display(CGRect frame) {
+  CGDirectDisplayID display;
+  uint32_t count = 0;
+  CGGetDisplaysWithRect(frame, 1, &display, &count);
+  return count == 1 && CGRectEqualToRect(frame, CGDisplayBounds(display));
+}
+
+static void end_expose(void) {
+  LOG("expose end");
+  dispatch_source_cancel(E.expose_timer);
+  dispatch_release(E.expose_timer);
+  E.expose_timer = NULL;
+  E.backdrop_count = 0;
+  E.expose_up = false;
+  for (int i = 0; i < E.count; i++) overlay_destroy(&E.windows[i].thumbnail, E.border_cid);
+}
+
+// True while one of the candidates is ordered in at the backdrop level. Forgets the
+// candidates that no longer exist.
+static bool backdrop_up(void) {
+  bool up = false;
+  for (int i = E.backdrop_count - 1; i >= 0; i--) {
+    window_info info;
+    if (!query_window(E.backdrops[i], &info)) {
+      E.backdrops[i] = E.backdrops[--E.backdrop_count];
+      continue;
+    }
+    bool ordered_in = false;
+    sl.WindowIsOrderedIn(E.cid, E.backdrops[i], &ordered_in);
+    if (ordered_in && info.level == EXPOSE_BACKDROP_LEVEL) up = true;
+  }
+  return up;
+}
+
+static void follow_thumbnails(void) {
+  if (!backdrop_up()) {
+    // Closed, or not Exposé at all (the Dock also creates full-screen windows when it restarts).
+    if (E.expose_up || !E.backdrop_count || CFAbsoluteTimeGetCurrent() - E.expose_start > EXPOSE_TIMEOUT)
+      end_expose();
+    return;
+  }
+  if (!E.expose_up) LOG("expose up");
+  E.expose_up = true;
+
+  CFMutableArrayRef wids = CFArrayCreateMutable(NULL, E.count, NULL);
+  for (int i = 0; i < E.count; i++)
+    CFArrayAppendValue(wids, (const void *)(uintptr_t)E.windows[i].wid);
+  CFArrayRef descriptions = CGWindowListCreateDescriptionFromArray(wids);
+  CFRelease(wids);
+  if (!descriptions) return;
+  for (CFIndex i = 0; i < CFArrayGetCount(descriptions); i++) {
+    CFDictionaryRef d = CFArrayGetValueAtIndex(descriptions, i);
+    uint32_t wid = 0;
+    CFNumberGetValue(CFDictionaryGetValue(d, kCGWindowNumber), kCFNumberSInt32Type, &wid);
+    tracked_window *w = find(wid);
+    if (!w) continue;
+    // w->overlay.shown: the window was visible before Exposé, so its frame and radius are known.
+    // Windows Exposé leaves out (e.g. other apps in App Exposé) shrink to a point.
+    CFDictionaryRef bounds = CFDictionaryGetValue(d, kCGWindowBounds);
+    CGRect thumb;
+    bool visible = E.enabled && w->styled && w->overlay.shown &&
+                   CFDictionaryGetValue(d, kCGWindowIsOnscreen) == kCFBooleanTrue && bounds &&
+                   CGRectMakeWithDictionaryRepresentation(bounds, &thumb) &&
+                   thumb.size.width >= MIN_WINDOW_SIZE && thumb.size.height >= MIN_WINDOW_SIZE;
+    if (!visible) {
+      overlay_hide(&w->thumbnail, E.border_cid);
+      continue;
+    }
+    overlay_style style = {
+        .width = E.width,
+        .radius = w->overlay.style.radius * thumb.size.width / w->overlay.frame.size.width,
+        .color = w->color,
+        .alpha = 1.0f,  // nothing is focused in Exposé: every thumbnail is a candidate
+        .level = CGWindowLevelForKey(kCGDockWindowLevelKey) + 1,  // above Mission Control
+        .expose = true,
+    };
+    overlay_show(&w->thumbnail, E.border_cid, 0, thumb, &style);
+  }
+  CFRelease(descriptions);
+}
+
+// Mission Control and App Exposé each create new full-screen Dock windows; one of them
+// becomes the backdrop (level 18) a little later, and all are destroyed on close. Their
+// level events are the only signal we get, so poll from the first one until they're gone.
+static void check_expose(uint32_t wid) {
+  if (E.backdrop_count == MAX_BACKDROPS || !is_dock(window_pid(wid))) return;
+  for (int i = 0; i < E.backdrop_count; i++)
+    if (E.backdrops[i] == wid) return;
+  window_info info;
+  if (!query_window(wid, &info) || !covers_display(info.frame)) return;
+  E.backdrops[E.backdrop_count++] = wid;
+  if (E.expose_timer) return;
+  LOG("expose candidate %u", wid);
+  E.expose_start = CFAbsoluteTimeGetCurrent();
+  E.expose_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+  dispatch_source_set_timer(E.expose_timer, DISPATCH_TIME_NOW, NSEC_PER_SEC / EXPOSE_FPS, NSEC_PER_MSEC);
+  dispatch_source_set_event_handler(E.expose_timer, ^{
+    follow_thumbnails();
+  });
+  dispatch_resume(E.expose_timer);
+}
+
 // MARK: - Events
 
 static void handle_event(uint32_t event, void *data, size_t length, void *context) {
@@ -405,9 +537,12 @@ static void handle_event(uint32_t event, void *data, size_t length, void *contex
     }
     break;
   case EVENT_WINDOW_RESIZE:
-  case EVENT_WINDOW_LEVEL:
   case EVENT_WINDOW_UNHIDE:
     if (w) mark_dirty(w);
+    break;
+  case EVENT_WINDOW_LEVEL:
+    if (w) mark_dirty(w);
+    else check_expose(wid);
     break;
   case EVENT_WINDOW_HIDE:
     if (w) {
