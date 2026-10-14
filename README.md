@@ -19,9 +19,10 @@ make clean
 - **Menu bar icon → app name:** opens the colour panel for that app. Changes apply immediately.
 - **Border Width:** slider (1–20 pt); borders update while you drag.
 - **Show Borders:** turns all borders on or off.
+- **Dim Inactive Borders:** when on (default), only the focused window's border is at full colour and the others are half transparent. Turn it off to make every border solid.
 - **Launch at Login:** starts the app when you log in.
 
-The focused window's border is drawn at full colour; other windows are dimmed. Settings live in `~/Library/Application Support/BorderColor/config.json` (width, and bundle id → colour). You never need to edit it.
+Settings live in `~/Library/Application Support/BorderColor/config.json` (width, dimming, and bundle id → colour). You never need to edit it.
 
 ## How it works
 

@@ -12,6 +12,7 @@ enum Engine {
     static func start(store: ColorStore) -> String? {
         self.store = store
         be_set_width(store.width)
+        be_set_dim_inactive(store.dimInactive)
         let started = be_start({ pid, color, _ in
             MainActor.assumeIsolated {
                 guard let rgb = Engine.store?.borderColor(forPID: pid)?.usingColorSpace(.sRGB) else {
@@ -34,6 +35,10 @@ enum Engine {
 
     static func setWidth(_ width: Double) {
         be_set_width(width)
+    }
+
+    static func setDimInactive(_ dim: Bool) {
+        be_set_dim_inactive(dim)
     }
 
     static func refreshColors() {

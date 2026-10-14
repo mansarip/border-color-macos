@@ -70,6 +70,7 @@ static struct {
   be_color_fn color_fn;
   void *color_context;
   float width;
+  bool solid_inactive;  // false: unfocused borders are dimmed
   tracked_window *windows;
   int count, capacity;
   uint32_t focused;
@@ -150,8 +151,12 @@ static tracked_window *find(uint32_t wid) {
   return NULL;
 }
 
+static float inactive_alpha(void) {
+  return E.solid_inactive ? 1.0f : INACTIVE_ALPHA;
+}
+
 static float alpha_for(const tracked_window *w) {
-  return w->wid == E.focused ? 1.0f : INACTIVE_ALPHA;
+  return w->wid == E.focused ? 1.0f : inactive_alpha();
 }
 
 static void untrack(tracked_window *w) {
@@ -266,7 +271,7 @@ static void update_focus(void) {
   LOG("focus %u -> %u", E.focused, focused);
   tracked_window *previous = find(E.focused);
   E.focused = focused;
-  if (previous) overlay_set_alpha(&previous->overlay, E.border_cid, INACTIVE_ALPHA);
+  if (previous) overlay_set_alpha(&previous->overlay, E.border_cid, inactive_alpha());
   tracked_window *current = find(focused);
   if (current) overlay_set_alpha(&current->overlay, E.border_cid, 1.0f);
 }
@@ -487,6 +492,12 @@ void be_set_width(double width) {
   if (!E.started) return;
   for (int i = 0; i < E.count; i++) E.windows[i].dirty = true;
   flush();
+}
+
+void be_set_dim_inactive(bool dim) {
+  E.solid_inactive = !dim;
+  for (int i = 0; i < E.count; i++)
+    overlay_set_alpha(&E.windows[i].overlay, E.border_cid, alpha_for(&E.windows[i]));
 }
 
 void be_refresh_colors(void) {

@@ -9,6 +9,7 @@ final class ColorStore {
         var version = 1
         var enabled = true
         var width = 4.0  // points
+        var dimInactive = true
         var colors: [String: String] = [:]  // bundle id → "#RRGGBB"
 
         init() {}
@@ -18,6 +19,7 @@ final class ColorStore {
             version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
             enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
             width = try container.decodeIfPresent(Double.self, forKey: .width) ?? 4
+            dimInactive = try container.decodeIfPresent(Bool.self, forKey: .dimInactive) ?? true
             colors = try container.decodeIfPresent([String: String].self, forKey: .colors) ?? [:]
         }
     }
@@ -52,6 +54,14 @@ final class ColorStore {
         get { config.width }
         set {
             config.width = newValue
+            scheduleSave()
+        }
+    }
+
+    var dimInactive: Bool {
+        get { config.dimInactive }
+        set {
+            config.dimInactive = newValue
             scheduleSave()
         }
     }

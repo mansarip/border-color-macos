@@ -23,6 +23,10 @@ void be_set_enabled(bool enabled);
 // Border thickness in points (clamped to 1...40). May be called before be_start.
 void be_set_width(double width);
 
+// When true (the default), borders of unfocused windows are drawn at half opacity;
+// when false, every border is solid. May be called before be_start.
+void be_set_dim_inactive(bool dim);
+
 // Re-asks color_fn for every tracked window and redraws borders whose colour changed.
 void be_refresh_colors(void);
 

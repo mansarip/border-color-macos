@@ -53,6 +53,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         borders.state = store.enabled ? .on : .off
         menu.addItem(borders)
 
+        let dim = NSMenuItem(title: "Dim Inactive Borders", action: #selector(toggleDimInactive), keyEquivalent: "")
+        dim.target = self
+        dim.state = store.dimInactive ? .on : .off
+        menu.addItem(dim)
+
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -70,6 +75,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleBorders() {
         store.enabled.toggle()
         Engine.setEnabled(store.enabled)
+    }
+
+    @objc private func toggleDimInactive() {
+        store.dimInactive.toggle()
+        Engine.setDimInactive(store.dimInactive)
     }
 
     @objc private func toggleLaunchAtLogin() {
