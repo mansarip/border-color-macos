@@ -4,15 +4,30 @@ A coloured border around every app window, so you can tell windows apart at a gl
 
 A small menu bar app: each app gets a colour automatically. Click the app in the menu to choose a different one.
 
+## Install
+
+Requires macOS 14 or later. The app is a universal binary (Apple silicon and Intel).
+
+1. Download `BorderColor-<version>.zip` from [Releases](https://github.com/mansarip/border-color-macos/releases/latest), unzip it, and move **BorderColor.app** to `/Applications`.
+2. The app is ad-hoc signed, not notarized by Apple, so macOS blocks the first launch. Open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Or clear the download flag in Terminal:
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/BorderColor.app
+   ```
+3. A dashed square appears in the menu bar. Turn on **Launch at Login** there if you want it to start with your Mac.
+
 ## Build and run
 
-Requires macOS 14+ and the Swift 6 toolchain (Xcode or Command Line Tools).
+Requires the Swift 6 toolchain (Xcode or Command Line Tools).
 
 ```sh
-make run     # build build/BorderColor.app and launch it
-make debug   # same, in the foreground with engine logging
+make run      # build build/BorderColor.app and launch it
+make debug    # same, in the foreground with engine logging
+make release  # build build/BorderColor-<version>.zip for a GitHub release
+make icon     # redraw Resources/AppIcon.icns from scripts/make-icon.swift
 make clean
 ```
+
+The version comes from `CFBundleShortVersionString` in `Resources/Info.plist`.
 
 ## Use
 
@@ -38,6 +53,7 @@ Settings live in `~/Library/Application Support/BorderColor/config.json` (width,
 
 - Closing a window that isn't focused (e.g. with its close button while another window is focused) still leaves its border on screen for ~0.3 s. macOS sends no event when the fade starts, only when it ends, and only the focused window's opacity is polled.
 - Stage Manager isn't handled.
+- Only tested on Apple silicon with macOS 26. The Intel build compiles but hasn't been run.
 - Mission Control detection relies on Dock behaviour observed on macOS 26 (a new full-screen Dock window that rises to level 18), so it may need adjusting on other versions.
 - Private APIs can change with macOS updates, and the app can't be distributed through the Mac App Store.
 
