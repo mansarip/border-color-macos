@@ -85,6 +85,7 @@ static struct {
   be_color_fn color_fn;
   void *color_context;
   float width;
+  float corner_radius;  // borders' outer corner radius; negative: follow each window's
   bool solid_inactive;  // false: unfocused borders are dimmed
   tracked_window *windows;
   int count, capacity;
@@ -97,7 +98,7 @@ static struct {
   bool expose_up;
   bool flush_pending, focus_pending, reconcile_pending, watch_list_dirty;
   dispatch_source_t fade_timer;
-} E;
+} E = {.corner_radius = -1};
 
 // MARK: - Window queries
 
@@ -207,6 +208,7 @@ static void refresh(tracked_window *w) {
   overlay_style style = {
       .width = E.width,
       .radius = info.radius,
+      .outer_radius = E.corner_radius,
       .color = w->color,
       .alpha = alpha_for(w),
       .space = window_space(w->wid),
@@ -518,9 +520,12 @@ static void follow_thumbnails(void) {
     }
     if (w->thumb_still >= EXPOSE_SETTLE_TICKS) continue;  // already shown
     if (++w->thumb_still < EXPOSE_SETTLE_TICKS) continue;
+    // Corners scale with the thumbnail; the width doesn't.
+    float scale = thumb.size.width / w->overlay.frame.size.width;
     overlay_style style = {
         .width = EXPOSE_WIDTH,
-        .radius = w->overlay.style.radius * thumb.size.width / w->overlay.frame.size.width,
+        .radius = w->overlay.style.radius * scale,
+        .outer_radius = E.corner_radius < 0 ? -1 : E.corner_radius * scale,
         .color = w->color,
         .alpha = 1.0f,  // nothing is focused in Exposé: every thumbnail is a candidate
         .level = CGWindowLevelForKey(kCGDockWindowLevelKey) + 1,  // above Mission Control
@@ -693,6 +698,15 @@ void be_set_width(double width) {
   float clamped = width < MIN_WIDTH ? MIN_WIDTH : width > MAX_WIDTH ? MAX_WIDTH : (float)width;
   if (clamped == E.width) return;
   E.width = clamped;
+  if (!E.started) return;
+  for (int i = 0; i < E.count; i++) E.windows[i].dirty = true;
+  flush();
+}
+
+void be_set_corner_radius(double radius) {
+  float value = radius < 0 ? -1 : (float)radius;
+  if (value == E.corner_radius) return;
+  E.corner_radius = value;
   if (!E.started) return;
   for (int i = 0; i < E.count; i++) E.windows[i].dirty = true;
   flush();

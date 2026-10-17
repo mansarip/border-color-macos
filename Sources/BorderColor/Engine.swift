@@ -12,6 +12,7 @@ enum Engine {
     static func start(store: ColorStore) -> String? {
         self.store = store
         be_set_width(store.width)
+        be_set_corner_radius(store.cornerRadius ?? -1)
         be_set_dim_inactive(store.dimInactive)
         let started = be_start({ pid, color, _ in
             MainActor.assumeIsolated {
@@ -35,6 +36,11 @@ enum Engine {
 
     static func setWidth(_ width: Double) {
         be_set_width(width)
+    }
+
+    /// nil follows each window's own corners.
+    static func setCornerRadius(_ radius: Double?) {
+        be_set_corner_radius(radius ?? -1)
     }
 
     static func setDimInactive(_ dim: Bool) {

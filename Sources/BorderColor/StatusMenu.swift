@@ -5,6 +5,10 @@ import ServiceManagement
 /// colour; choosing a row opens the colour panel for that app.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
+    private static let widthRange = 1.0...20.0
+    // 0–30 pt, then a last stop for "Auto": follow each window's own corners.
+    private static let radiusRange = 0.0...31.0
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let store: ColorStore
     private let picker: ColorPicker
@@ -41,11 +45,22 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         let width = NSMenuItem()
-        width.view = WidthSlider(width: store.width) { [store] value in
+        width.view = MenuSlider(title: "Border Width", value: store.width, range: Self.widthRange,
+                                format: { "\(Int($0)) pt" }) { [store] value in
             store.width = value
             Engine.setWidth(value)
         }
         menu.addItem(width)
+
+        let auto = Self.radiusRange.upperBound
+        let radius = NSMenuItem()
+        radius.view = MenuSlider(title: "Corner Radius", value: store.cornerRadius ?? auto, range: Self.radiusRange,
+                                 format: { $0 == auto ? "Auto" : "\(Int($0)) pt" }) { [store] value in
+            let radius = value == auto ? nil : value
+            store.cornerRadius = radius
+            Engine.setCornerRadius(radius)
+        }
+        menu.addItem(radius)
 
         menu.addItem(.separator())
         let borders = NSMenuItem(title: "Show Borders", action: #selector(toggleBorders), keyEquivalent: "")

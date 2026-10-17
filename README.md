@@ -33,11 +33,12 @@ The version comes from `CFBundleShortVersionString` in `Resources/Info.plist`.
 
 - **Menu bar icon → app name:** opens the colour panel for that app. Changes apply immediately.
 - **Border Width:** slider (1–20 pt); borders update while you drag.
+- **Corner Radius:** slider (0–30 pt) for the borders' outer corners; 0 gives square corners. The last stop, **Auto** (default), follows each window's own corner so the border is equally thick all round.
 - **Show Borders:** turns all borders on or off.
 - **Dim Inactive Borders:** when on (default), only the focused window's border is at full colour and the others are half transparent. Turn it off to make every border solid.
 - **Launch at Login:** starts the app when you log in.
 
-Settings live in `~/Library/Application Support/BorderColor/config.json` (width, dimming, and bundle id → colour). You never need to edit it.
+Settings live in `~/Library/Application Support/BorderColor/config.json` (width, corner radius, dimming, and bundle id → colour). You never need to edit it.
 
 ## How it works
 

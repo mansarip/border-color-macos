@@ -9,6 +9,7 @@ final class ColorStore {
         var version = 1
         var enabled = true
         var width = 4.0  // points
+        var cornerRadius: Double?  // points; nil follows each window's corners
         var dimInactive = true
         var colors: [String: String] = [:]  // bundle id → "#RRGGBB"
 
@@ -19,6 +20,7 @@ final class ColorStore {
             version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
             enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
             width = try container.decodeIfPresent(Double.self, forKey: .width) ?? 4
+            cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
             dimInactive = try container.decodeIfPresent(Bool.self, forKey: .dimInactive) ?? true
             colors = try container.decodeIfPresent([String: String].self, forKey: .colors) ?? [:]
         }
@@ -54,6 +56,14 @@ final class ColorStore {
         get { config.width }
         set {
             config.width = newValue
+            scheduleSave()
+        }
+    }
+
+    var cornerRadius: Double? {
+        get { config.cornerRadius }
+        set {
+            config.cornerRadius = newValue
             scheduleSave()
         }
     }

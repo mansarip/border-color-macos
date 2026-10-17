@@ -9,13 +9,14 @@
 #define OVERLAY_MAX_STRIPS 4
 
 typedef struct {
-  float width;     // border thickness in points
-  float radius;    // target window's corner radius
+  float width;         // border thickness in points
+  float radius;        // target window's corner radius
+  float outer_radius;  // border's outer corner radius; negative: radius + width
   be_color color;
-  float alpha;     // whole-border opacity (focus state)
-  uint64_t space;  // Space the target lives on
-  int level;       // target window level
-  bool expose;     // drawn over a Mission Control thumbnail: no target, no Space, not faded
+  float alpha;         // whole-border opacity (focus state)
+  uint64_t space;      // Space the target lives on
+  int level;           // target window level
+  bool expose;         // drawn over a Mission Control thumbnail: no target, no Space, not faded
 } overlay_style;
 
 typedef struct {

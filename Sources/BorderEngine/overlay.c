@@ -105,10 +105,13 @@ static void draw_strip(overlay *o, int cid, int i) {
   CGContextScaleCTM(c, 1, -1);
 
   // A ring hugging the window: outside the frame by the border width, and 1pt inside it
-  // (hidden under the window, which sits above) so no gap shows at the edge.
+  // (hidden under the window, which sits above) so no gap shows at the edge. By default
+  // the outer corner follows the window's, keeping the ring as thick at the corners as
+  // along the edges.
   CGFloat width = o->style.width;
+  CGFloat outer = o->style.outer_radius >= 0 ? o->style.outer_radius : o->style.radius + width;
   CGMutablePathRef path = CGPathCreateMutable();
-  add_rounded_rect(path, CGRectInset(o->frame, -width, -width), o->style.radius + width);
+  add_rounded_rect(path, CGRectInset(o->frame, -width, -width), outer);
   add_rounded_rect(path, CGRectInset(o->frame, 1, 1), fmax(o->style.radius - 1, 0));
   CGContextAddPath(c, path);
   CGColorRef color = CGColorCreateSRGB(o->style.color.r, o->style.color.g, o->style.color.b,
@@ -160,7 +163,8 @@ static void update(overlay *o, int cid, uint32_t target, CGRect frame, overlay_s
                         o->frame.origin.y - o->rect[0].origin.y};
   bool redraw = created || resized || !CGSizeEqualToSize(frame.size, o->frame.size) ||
                 !CGPointEqualToPoint(offset, old_offset) || style.width != o->style.width ||
-                style.radius != o->style.radius || !same_color(style.color, o->style.color);
+                style.radius != o->style.radius || style.outer_radius != o->style.outer_radius ||
+                !same_color(style.color, o->style.color);
 
   // Freeze screen updates so reshaped strips never show stale content.
   if (resized) sl.DisableUpdate(cid);
@@ -179,6 +183,7 @@ static void update(overlay *o, int cid, uint32_t target, CGRect frame, overlay_s
   memcpy(o->rect, strips, sizeof(CGRect) * count);
   o->style.width = style.width;
   o->style.radius = style.radius;
+  o->style.outer_radius = style.outer_radius;
   o->style.color = style.color;
   if (redraw)
     for (int i = 0; i < count; i++) draw_strip(o, cid, i);

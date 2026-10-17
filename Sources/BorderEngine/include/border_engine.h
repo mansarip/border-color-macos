@@ -23,6 +23,10 @@ void be_set_enabled(bool enabled);
 // Border thickness in points (clamped to 1...40). May be called before be_start.
 void be_set_width(double width);
 
+// Outer corner radius of every border in points; 0 gives square corners. Negative (the
+// default): follow each window's own corner. May be called before be_start.
+void be_set_corner_radius(double radius);
+
 // When true (the default), borders of unfocused windows are drawn at half opacity;
 // when false, every border is solid. May be called before be_start.
 void be_set_dim_inactive(bool dim);
